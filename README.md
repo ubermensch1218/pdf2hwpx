@@ -15,7 +15,14 @@ PDF를 HWPX(한글 문서)로 변환하는 오픈소스 라이브러리
 ## 설치
 
 ```bash
+# 기본 설치 (Cloud API만 사용)
 pip install pdf2hwpx
+
+# vLLM/로컬 OCR 사용
+pip install "pdf2hwpx[ocr]"
+
+# 전체 설치
+pip install "pdf2hwpx[all]"
 ```
 
 ## 빠른 시작
@@ -41,17 +48,38 @@ converter = Pdf2Hwpx(
 converter.convert("input.pdf", "output.hwpx")
 ```
 
-### 자체 vLLM 서버 사용
+### 자체 vLLM 서버 사용 (BBOX + OCR)
+
+vLLM 서버를 사용하면 **BBOX(위치 정보) + OCR**을 한 번에 수행합니다.
 
 ```python
 from pdf2hwpx import Pdf2Hwpx
 
+# gemini-2.5-flash-lite 등 Vision 모델이 필요합니다
 converter = Pdf2Hwpx(
     backend="vllm",
     base_url="http://localhost:8000/v1",
-    api_key="your-key"
+    model="gemini-2.5-flash-lite"  # 선택사항
 )
 converter.convert("input.pdf", "output.hwpx")
+```
+
+**vLLM 서버 실행 예시**:
+```bash
+# vLLM으로 gemini-2.5-flash-lite 서비스 시작
+vllm serve google/gemini-2.0-flash-exp \
+  --port 8000 \
+  --chat-template template.jinja \
+  --max-model-len 4096
+```
+
+**참고**: vLLM 백엔드는 PDF를 이미지로 변환 후 Vision API로 분석합니다. `poppler`가 필요합니다:
+```bash
+# macOS
+brew install poppler
+
+# Ubuntu/Debian
+apt-get install poppler-utils
 ```
 
 ## CLI 사용
@@ -72,8 +100,20 @@ pdf2hwpx input.pdf -o output.hwpx --backend vllm --base-url http://localhost:800
 | 백엔드 | 비용 | 특징 |
 |--------|------|------|
 | **cloud** (기본) | ~2원/페이지 | 가장 쉬움, HWPX 변환 포함 |
+| **vllm** | 자체 비용 (원가 ~1원/페이지) | BBOX+OCR, 직접 서버 운영 |
 | openai | ~50원/페이지 | OpenAI Vision API |
-| vllm | 자체 비용 | 직접 서버 운영 필요 |
+
+### 파이프라인
+
+```
+┌─────────┐     ┌─────────────┐     ┌─────────┐
+│  PDF    │ ──▶ │  OCR + BBOX │ ──▶ │  HWPX   │
+└─────────┘     └─────────────┘     └─────────┘
+                      │
+                      ├─ cloud: 우리 API 서버
+                      ├─ vllm:  자체 vLLM 서버 (gemini-2.5-flash-lite 등)
+                      └─ openai: OpenAI Vision API
+```
 
 ## 가격
 
