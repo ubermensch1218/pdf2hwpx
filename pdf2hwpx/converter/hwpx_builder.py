@@ -1,26 +1,38 @@
 """HWPX 빌더 - OCR 결과를 HWPX로 변환"""
 
-import io
-import zipfile
 from pathlib import Path
-from typing import Optional
-from xml.etree import ElementTree as ET
+from typing import Dict, List, Optional
 
-from pdf2hwpx.ocr.base import OCRResult, PageResult, TextBlock, Table
+from pdf2hwpx.ocr.base import OCRResult, PageResult, TextBlock, Table, TableCell
+from pdf2hwpx.hwpx_ir.models import (
+    IrBlock,
+    IrDocument,
+    IrImage,
+    IrParagraph,
+    IrTable,
+    IrTableCell as IrTableCell,
+    IrTextRun,
+)
+from pdf2hwpx.hwpx_ir.hwpx_writer import HwpxIrWriter, HwpxBinaryItem
 
 
 class HwpxBuilder:
     """OCR 결과를 HWPX 파일로 변환"""
 
-    # HWPX 네임스페이스
-    NAMESPACES = {
-        "hp": "http://www.hancom.co.kr/hwpml/2011/paragraph",
-        "hs": "http://www.hancom.co.kr/hwpml/2011/section",
-        "hc": "http://www.hancom.co.kr/hwpml/2011/core",
-    }
+    def __init__(self, template_path: Optional[str] = None):
+        """
+        Args:
+            template_path: HWPX 템플릿 파일 경로
+        """
+        if template_path is None:
+            # 기본 템플릿 사용
+            template_path = Path(__file__).parent.parent / "templates" / "template.hwpx"
 
-    def __init__(self):
-        pass
+        self.template_path = Path(template_path)
+        if not self.template_path.exists():
+            raise FileNotFoundError(f"HWPX template not found: {template_path}")
+
+        self.writer = HwpxIrWriter(str(self.template_path))
 
     def build(self, ocr_result: OCRResult, output_path: Path) -> None:
         """
@@ -44,102 +56,73 @@ class HwpxBuilder:
         Returns:
             HWPX 파일 바이트
         """
-        buffer = io.BytesIO()
+        # OCR 결과 → IR 변환
+        doc = self._ocr_result_to_ir(ocr_result)
 
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            # 1. [Content_Types].xml
-            zf.writestr("[Content_Types].xml", self._create_content_types())
+        # TODO: 이미지 처리
+        binary_items: Dict[str, HwpxBinaryItem] = {}
 
-            # 2. _rels/.rels
-            zf.writestr("_rels/.rels", self._create_rels())
+        # IR → HWPX 변환
+        return self.writer.write(doc, binary_items=binary_items)
 
-            # 3. META-INF/manifest.xml
-            zf.writestr("META-INF/manifest.xml", self._create_manifest())
-
-            # 4. header.xml (문서 헤더)
-            zf.writestr("header.xml", self._create_header())
-
-            # 5. Contents/section0.xml (본문)
-            section_xml = self._create_section(ocr_result)
-            zf.writestr("Contents/section0.xml", section_xml)
-
-        buffer.seek(0)
-        return buffer.read()
-
-    def _create_content_types(self) -> str:
-        """[Content_Types].xml 생성"""
-        return '''<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-    <Default Extension="xml" ContentType="application/xml"/>
-    <Override PartName="/header.xml" ContentType="application/hwp+xml"/>
-    <Override PartName="/Contents/section0.xml" ContentType="application/hwp+xml"/>
-</Types>'''
-
-    def _create_rels(self) -> str:
-        """_rels/.rels 생성"""
-        return '''<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-    <Relationship Id="rId1" Type="http://www.hancom.co.kr/hwpml/2011/header" Target="header.xml"/>
-    <Relationship Id="rId2" Type="http://www.hancom.co.kr/hwpml/2011/section" Target="Contents/section0.xml"/>
-</Relationships>'''
-
-    def _create_manifest(self) -> str:
-        """META-INF/manifest.xml 생성"""
-        return '''<?xml version="1.0" encoding="UTF-8"?>
-<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">
-    <manifest:file-entry manifest:full-path="/" manifest:media-type="application/hwp+zip"/>
-    <manifest:file-entry manifest:full-path="header.xml" manifest:media-type="application/hwp+xml"/>
-    <manifest:file-entry manifest:full-path="Contents/section0.xml" manifest:media-type="application/hwp+xml"/>
-</manifest:manifest>'''
-
-    def _create_header(self) -> str:
-        """header.xml 생성"""
-        return '''<?xml version="1.0" encoding="UTF-8"?>
-<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
-    <hh:beginNum page="1" footnote="1" endnote="1" picture="1" table="1" equation="1"/>
-    <hh:refList>
-        <hh:fontfaces>
-            <hh:fontface lang="HANGUL" fontCnt="1">
-                <hh:font id="0" face="맑은 고딕" type="TTF"/>
-            </hh:fontface>
-        </hh:fontfaces>
-    </hh:refList>
-</hh:head>'''
-
-    def _create_section(self, ocr_result: OCRResult) -> str:
-        """section0.xml 생성 (본문)"""
-        paragraphs = []
+    def _ocr_result_to_ir(self, ocr_result: OCRResult) -> IrDocument:
+        """OCR 결과를 IR 문서로 변환"""
+        blocks: List[IrBlock] = []
 
         for page in ocr_result.pages:
-            for block in page.text_blocks:
-                para = self._create_paragraph(block.text)
-                paragraphs.append(para)
+            # 페이지별로 변환
+            page_blocks = self._page_to_blocks(page)
+            blocks.extend(page_blocks)
 
-            # 페이지 구분 (마지막 페이지 제외)
-            if page.page_num < len(ocr_result.pages):
-                paragraphs.append('<hp:p><hp:ctrl><hp:colPr type="PAGE_BREAK"/></hp:ctrl></hp:p>')
+        return IrDocument(blocks=blocks)
 
-        content = "\n".join(paragraphs)
+    def _page_to_blocks(self, page: PageResult) -> List[IrBlock]:
+        """페이지를 IR 블록들로 변환"""
+        blocks: List[IrBlock] = []
 
-        return f'''<?xml version="1.0" encoding="UTF-8"?>
-<hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
-        xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section">
-    {content}
-</hs:sec>'''
+        # 텍스트 블록을 단락으로 변환
+        for text_block in page.text_blocks:
+            para = IrParagraph(
+                inlines=[
+                    IrTextRun(
+                        text=text_block.text,
+                    )
+                ]
+            )
+            blocks.append(IrBlock(type="paragraph", paragraph=para))
 
-    def _create_paragraph(self, text: str) -> str:
-        """단락 XML 생성"""
-        # XML 이스케이프
-        escaped_text = (
-            text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
+        # 테이블 변환
+        for table in page.tables:
+            ir_table = self._table_to_ir(table)
+            blocks.append(IrBlock(type="table", table=ir_table))
+
+        return blocks
+
+    def _table_to_ir(self, table: Table) -> IrTable:
+        """테이블을 IR 테이블로 변환"""
+        # 셀을 IR 셀로 변환
+        ir_cells: List[IrTableCell] = []
+
+        for cell in table.cells:
+            # 셀 내용을 단락으로 변환
+            cell_para = IrParagraph(
+                inlines=[
+                    IrTextRun(text=cell.text)
+                ]
+            )
+            cell_block = IrBlock(type="paragraph", paragraph=cell_para)
+
+            ir_cell = IrTableCell(
+                row=cell.row,
+                col=cell.col,
+                row_span=cell.rowspan,
+                col_span=cell.colspan,
+                blocks=[cell_block],
+            )
+            ir_cells.append(ir_cell)
+
+        return IrTable(
+            row_cnt=table.rows,
+            col_cnt=table.cols,
+            cells=ir_cells,
         )
-
-        return f'''<hp:p>
-    <hp:run>
-        <hp:t>{escaped_text}</hp:t>
-    </hp:run>
-</hp:p>'''

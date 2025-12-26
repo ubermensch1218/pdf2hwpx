@@ -28,6 +28,7 @@ classifiers = [
 
 dependencies = [
     "httpx>=0.25.0",
+    "lxml>=5.0.0",
 ]
 
 [project.optional-dependencies]
