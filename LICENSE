@@ -76,7 +76,7 @@ If you develop a new program, and you want it to be of the greatest possible use
 To do so, attach the following notices to the program. It is safest to attach them to the start of each source file to most effectively state the exclusion of warranty; and each file should have at least the "copyright" line and a pointer to where the full notice is found.
 
     pdf2hwpx - PDF to HWPX converter
-    Copyright (C) 2025 ubermensch1218
+    Copyright (C) 2025 room821
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -93,5 +93,5 @@ To do so, attach the following notices to the program. It is safest to attach th
 
 Also add information on how to contact you by electronic and paper mail.
 
-    contact@pdf2hwpx.com
-    https://pdf2hwpx.com
+    contact@room821.im
+    https://github.com/room821/pdf2hwpx
