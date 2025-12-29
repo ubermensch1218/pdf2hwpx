@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from lxml import etree
 from PIL import Image
 
-from pdf2hwpx.hwpx_ir.hwpx_writer import HwpxIrWriter, HwpxBinaryItem
+from pdf2hwpx.hwpx_ir.writer import HwpxIrWriter, HwpxBinaryItem
 from pdf2hwpx.hwpx_ir.models import (
     IrBlock, IrDocument, IrImage, IrParagraph, IrTextRun
 )

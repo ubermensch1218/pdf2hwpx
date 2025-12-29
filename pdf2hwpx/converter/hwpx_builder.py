@@ -13,7 +13,7 @@ from pdf2hwpx.hwpx_ir.models import (
     IrTableCell as IrTableCell,
     IrTextRun,
 )
-from pdf2hwpx.hwpx_ir.hwpx_writer import HwpxIrWriter, HwpxBinaryItem
+from pdf2hwpx.hwpx_ir.writer import HwpxIrWriter, HwpxBinaryItem
 
 
 class HwpxBuilder:
