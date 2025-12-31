@@ -9,6 +9,8 @@ from pdf2hwpx.ocr.base import OCRBackend
 from pdf2hwpx.ocr.cloud import CloudOCR
 from pdf2hwpx.ocr.openai import OpenAIOCR
 from pdf2hwpx.ocr.vllm import VllmOCR
+from pdf2hwpx.ocr.pymupdf import PyMuPDFBackend
+from pdf2hwpx.ocr.mineru import MinerUBackend
 from pdf2hwpx.converter.hwpx_builder import HwpxBuilder
 
 
@@ -17,13 +19,13 @@ class Pdf2Hwpx:
 
     def __init__(
         self,
-        backend: Literal["cloud", "openai", "vllm"] = "cloud",
+        backend: Literal["cloud", "openai", "vllm", "pymupdf", "mineru"] = "cloud",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
     ):
         """
         Args:
-            backend: OCR 백엔드 ("cloud", "openai", "vllm")
+            backend: OCR 백엔드 ("cloud", "openai", "vllm", "pymupdf", "mineru")
             api_key: API 키
             base_url: vLLM 서버 URL (vllm 백엔드 사용 시)
         """
@@ -41,6 +43,10 @@ class Pdf2Hwpx:
             return OpenAIOCR(api_key=self.api_key)
         elif self.backend == "vllm":
             return VllmOCR(base_url=self.base_url, api_key=self.api_key)
+        elif self.backend == "pymupdf":
+            return PyMuPDFBackend()
+        elif self.backend == "mineru":
+            return MinerUBackend()
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
 

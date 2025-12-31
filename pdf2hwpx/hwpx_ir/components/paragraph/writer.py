@@ -7,7 +7,7 @@ from typing import Optional, TYPE_CHECKING
 from lxml import etree
 
 from pdf2hwpx.hwpx_ir.base import NS, qname
-from pdf2hwpx.hwpx_ir.models import IrParagraph, IrTextRun, IrLineBreak
+from pdf2hwpx.hwpx_ir.models import IrParagraph, IrTextRun, IrLineBreak, IrTab
 
 if TYPE_CHECKING:
     from pdf2hwpx.hwpx_ir.writer import StyleManager
@@ -39,6 +39,18 @@ class ParagraphWriter:
             # 빈 단락
             run = etree.SubElement(p, qname("hp", "run"))
             run.set("charPrIDRef", "0")
+            # linesegarray 추가
+            linesegarray = etree.SubElement(p, qname("hp", "linesegarray"))
+            lineseg = etree.SubElement(linesegarray, qname("hp", "lineseg"))
+            lineseg.set("textpos", "0")
+            lineseg.set("vertpos", "0")
+            lineseg.set("vertsize", "1000")
+            lineseg.set("textheight", "1000")
+            lineseg.set("baseline", "850")
+            lineseg.set("spacing", "600")
+            lineseg.set("horzpos", "0")
+            lineseg.set("horzsize", "0")
+            lineseg.set("flags", "393216")
             return p
 
         for inline in para.inlines:
@@ -61,6 +73,22 @@ class ParagraphWriter:
 
             elif isinstance(inline, IrLineBreak):
                 etree.SubElement(run, qname("hp", "lineBreak"))
+
+            elif isinstance(inline, IrTab):
+                etree.SubElement(run, qname("hp", "tab"))
+
+        # linesegarray 추가 (렌더링에 필수)
+        linesegarray = etree.SubElement(p, qname("hp", "linesegarray"))
+        lineseg = etree.SubElement(linesegarray, qname("hp", "lineseg"))
+        lineseg.set("textpos", "0")
+        lineseg.set("vertpos", "0")
+        lineseg.set("vertsize", "1000")
+        lineseg.set("textheight", "1000")
+        lineseg.set("baseline", "850")
+        lineseg.set("spacing", "600")
+        lineseg.set("horzpos", "0")
+        lineseg.set("horzsize", "0")
+        lineseg.set("flags", "393216")
 
         return p
 

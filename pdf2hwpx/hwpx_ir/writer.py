@@ -66,6 +66,10 @@ class HwpxIdContext:
 class StyleManager:
     """HWPX 스타일 관리자"""
 
+    # 기본 폰트 설정 (함초롬돋움 = id 1)
+    DEFAULT_FONT_ID = 1
+    DEFAULT_FONT_SIZE = 1000  # 10pt
+
     def __init__(self, header_xml: bytes):
         self.tree = etree.fromstring(header_xml)
         self.root = self.tree
@@ -75,106 +79,29 @@ class StyleManager:
         if ref_list is None:
             ref_list = self.root
 
-        # 폰트 파싱
+        # 폰트 파싱 - fontface > font 구조
         self.fontfaces_node = ref_list.find(etree.QName(NS["hh"], "fontfaces"))
         self.font_map: Dict[str, int] = {}
-        self.next_font_id = 0
         if self.fontfaces_node is not None:
-            for ff in self.fontfaces_node.findall(etree.QName(NS["hh"], "fontface")):
-                fid = int(ff.get("id", "0"))
-                name = ff.get("font", "")
-                self.font_map[name] = fid
-                if fid >= self.next_font_id:
-                    self.next_font_id = fid + 1
+            for fontface in self.fontfaces_node.findall(etree.QName(NS["hh"], "fontface")):
+                for font in fontface.findall(etree.QName(NS["hh"], "font")):
+                    fid = int(font.get("id", "0"))
+                    name = font.get("face", "")
+                    if name and name not in self.font_map:
+                        self.font_map[name] = fid
 
-        # 문자 속성 파싱
+        # 문자 속성 노드
         self.char_prs_node = ref_list.find(etree.QName(NS["hh"], "charProperties"))
-        self.char_pr_map: Dict[tuple, int] = {}
-        self.next_char_pr_id = 0
-        if self.char_prs_node is not None:
-            for cp in self.char_prs_node.findall(etree.QName(NS["hh"], "charPr")):
-                cid = int(cp.get("id", "0"))
-                if cid >= self.next_char_pr_id:
-                    self.next_char_pr_id = cid + 1
 
     def get_font_id(self, font_name: str) -> int:
-        """폰트 ID 반환 (없으면 새로 생성)"""
+        """폰트 ID 반환 (없으면 기본 1)"""
         if not font_name:
-            return 0
-        if font_name in self.font_map:
-            return self.font_map[font_name]
-
-        # 새 폰트 생성
-        fid = self.next_font_id
-        self.next_font_id += 1
-
-        if self.fontfaces_node is not None:
-            ff = etree.SubElement(self.fontfaces_node, etree.QName(NS["hh"], "fontface"))
-            ff.set("lang", "ko")
-            ff.set("font", font_name)
-            ff.set("id", str(fid))
-
-        self.font_map[font_name] = fid
-        return fid
+            return self.DEFAULT_FONT_ID
+        return self.font_map.get(font_name, self.DEFAULT_FONT_ID)
 
     def get_char_pr_id(self, run: IrTextRun) -> int:
-        """문자 속성 ID 반환 (없으면 새로 생성)"""
-        # 기본 스타일이면 0 반환
-        if (
-            not run.bold
-            and not run.italic
-            and not run.underline
-            and not run.strikethrough
-            and run.font_size is None
-            and run.font_family is None
-            and run.color is None
-            and run.background_color is None
-        ):
-            return 0
-
-        # 시그니처로 캐시 확인
-        sig = (
-            run.bold,
-            run.italic,
-            run.underline,
-            run.strikethrough,
-            run.font_size,
-            run.font_family,
-            run.color,
-            run.background_color,
-        )
-        if sig in self.char_pr_map:
-            return self.char_pr_map[sig]
-
-        # 새 문자 속성 생성
-        cid = self.next_char_pr_id
-        self.next_char_pr_id += 1
-
-        if self.char_prs_node is not None:
-            cp = etree.SubElement(self.char_prs_node, etree.QName(NS["hh"], "charPr"))
-            cp.set("id", str(cid))
-            cp.set("height", str(run.font_size) if run.font_size else "1000")
-            cp.set("textColor", run.color if run.color else "#000000")
-
-            if run.font_family:
-                fid = self.get_font_id(run.font_family)
-                for attr in ["fontRef", "fontRefHangul", "fontRefLatin", "fontRefHanja",
-                             "fontRefJapanese", "fontRefOther", "fontRefSymbol", "fontRefUser"]:
-                    cp.set(attr, str(fid))
-
-            if run.bold:
-                cp.set("bold", "1")
-            if run.italic:
-                cp.set("italic", "1")
-            if run.underline:
-                cp.set("underline", "SINGLE")
-            if run.strikethrough:
-                cp.set("strikeout", "SINGLE")
-            if run.background_color:
-                cp.set("shadeColor", run.background_color)
-
-        self.char_pr_map[sig] = cid
-        return cid
+        """문자 속성 ID 반환 - 템플릿 기본 스타일(0) 사용"""
+        return 0
 
     def get_updated_header_xml(self) -> bytes:
         """업데이트된 header.xml 반환"""
@@ -330,6 +257,9 @@ class HwpxIrWriter:
 
         if block.type == "paragraph" and block.paragraph:
             p = self._paragraph_writer.build(block.paragraph, context.next_para_id())
+            # 페이지 브레이크 설정
+            if block.page_break:
+                p.set("pageBreak", "1")
             elements.append(p)
 
         elif block.type == "table" and block.table:

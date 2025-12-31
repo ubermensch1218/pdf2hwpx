@@ -324,6 +324,13 @@ class IrTextRun:
 
 @dataclass(frozen=True)
 class IrLineBreak:
+    """줄바꿈"""
+    pass
+
+
+@dataclass(frozen=True)
+class IrTab:
+    """탭 문자"""
     pass
 
 
@@ -408,7 +415,7 @@ class IrTrackChange:
     new_text: Optional[str] = None  # 삽입된 텍스트
 
 
-IrInline = Union[IrTextRun, IrLineBreak, IrHyperlink, IrBookmark, IrField, IrFootnote, IrEndnote, IrComment, IrTrackChange]
+IrInline = Union[IrTextRun, IrLineBreak, IrTab, IrHyperlink, IrBookmark, IrField, IrFootnote, IrEndnote, IrComment, IrTrackChange]
 
 
 @dataclass(frozen=True)
@@ -694,6 +701,7 @@ class IrBlock:
     list: Optional[IrList] = None  # 목록/번호매기기
     toc: Optional[IrTOC] = None  # 목차
     caption: Optional[IrCaption] = None  # 캡션 (이미지/표에 연결)
+    page_break: bool = False  # 이 블록 앞에 페이지 브레이크
 
 
 @dataclass(frozen=True)
