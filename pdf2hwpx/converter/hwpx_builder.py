@@ -12,6 +12,7 @@ from pdf2hwpx.hwpx_ir.models import (
     IrInline,
     IrLineBreak,
     IrParagraph,
+    IrSection,
     IrTab,
     IrTable,
     IrTableCell as IrTableCell,
@@ -92,9 +93,17 @@ class HwpxBuilder:
         blocks: List[IrBlock] = []
 
         for page_idx, page in enumerate(ocr_result.pages):
-            # 페이지별로 변환
-            page_blocks = self._page_to_blocks(page, is_first_page=(page_idx == 0))
-            blocks.extend(page_blocks)
+            # 페이지별로 섹션 생성 (컬럼 설정 포함)
+            section_blocks = self._page_to_blocks(page, is_first_page=(page_idx == 0))
+
+            # 섹션 생성 - col_count 적용
+            col_count = getattr(page, 'column_count', 1)
+            section = IrSection(
+                blocks=section_blocks,
+                col_count=col_count,
+                col_gap=850 if col_count > 1 else 0,  # 2컬럼일 때 간격 설정 (~15mm)
+            )
+            blocks.append(IrBlock(type="section", section=section))
 
         return IrDocument(blocks=blocks)
 
@@ -111,9 +120,15 @@ class HwpxBuilder:
 
         # 텍스트 블록을 단락으로 변환
         for text_block in page.text_blocks:
-            # 텍스트를 줄 단위로 분리하여 각각 단락으로 생성
-            para_blocks = self._text_to_paragraphs(text_block.text)
-            blocks.extend(para_blocks)
+            if getattr(text_block, 'is_box', False):
+                # 박스는 1x1 테두리 테이블로 변환
+                box_table = self._create_box_table(text_block.text)
+                blocks.append(IrBlock(type="table", table=box_table))
+            else:
+                # 일반 텍스트는 단락으로 변환 (heading_level 전달)
+                heading_level = getattr(text_block, 'heading_level', 0)
+                para_blocks = self._text_to_paragraphs(text_block.text, heading_level)
+                blocks.extend(para_blocks)
 
         # 테이블 변환
         for table in page.tables:
@@ -122,48 +137,106 @@ class HwpxBuilder:
 
         return blocks
 
-    def _text_to_paragraphs(self, text: str) -> List[IrBlock]:
-        """텍스트를 단락으로 변환 (블록 내 줄바꿈은 유지)"""
+    def _text_to_paragraphs(self, text: str, heading_level: int = 0) -> List[IrBlock]:
+        """텍스트를 단락으로 변환
+
+        Args:
+            text: 텍스트
+            heading_level: 제목 레벨 (0=일반, 1=대제목, 2=중제목, 3=소제목)
+        """
         blocks: List[IrBlock] = []
 
         if not text:
             return blocks
 
-        # 텍스트 정리 - 블록 내 줄바꿈을 공백으로 변환
-        # (PDF 표 셀 등에서 발생하는 불필요한 줄바꿈 제거)
-        cleaned = ' '.join(line.strip() for line in text.split('\n') if line.strip())
+        # heading_level에 따른 폰트 크기
+        font_size_map = {
+            0: self.font_size,  # 일반: 10pt
+            1: 1600,  # 대제목: 16pt
+            2: 1300,  # 중제목: 13pt
+            3: 1100,  # 소제목: 11pt
+        }
+        base_font_size = font_size_map.get(heading_level, self.font_size)
+        is_heading = heading_level > 0
 
-        if not cleaned:
-            return blocks
+        # 줄 단위로 처리
+        lines = text.split('\n')
 
-        # 불릿/리스트 패턴
-        bullet_pattern = re.compile(r'^(\s*)(○|●|◎|□|■|※|·|-|\*|→|▶|▷|►|◆|◇)\s*')
-        number_pattern = re.compile(r'^(\s*)(\d+)[.)\s]\s*')
-        sub_bullet_pattern = re.compile(r'^(\s*)[*-]\s+')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
 
-        indent_left = 0
+            # 인라인 요소 파싱 (굵은글씨 처리)
+            inlines = self._parse_markdown_inlines(line, base_font_size, is_heading)
 
-        # 불릿 패턴 감지
-        if bullet_pattern.match(cleaned):
-            indent_left = 400
-        elif sub_bullet_pattern.match(cleaned):
-            indent_left = 800
+            # 들여쓰기 감지
+            indent_left = 0
+            bullet_pattern = re.compile(r'^(○|●|◎|□|■|※|·|→|▶|▷|►|◆|◇)\s*')
+            if bullet_pattern.match(line):
+                indent_left = 400
 
-        inlines = [IrTextRun(
-            text=cleaned,
-            font_family=self.font_family,
-            font_size=self.font_size,
-        )]
-
-        para = IrParagraph(
-            inlines=inlines,
-            line_spacing_type="percent",
-            line_spacing_value=self.line_spacing,
-            indent_left=indent_left,
-        )
-        blocks.append(IrBlock(type="paragraph", paragraph=para))
+            para = IrParagraph(
+                inlines=inlines,
+                line_spacing_type="percent",
+                line_spacing_value=self.line_spacing,
+                indent_left=indent_left,
+            )
+            blocks.append(IrBlock(type="paragraph", paragraph=para))
 
         return blocks
+
+    def _parse_markdown_inlines(self, text: str, base_font_size: int, base_bold: bool) -> List[IrInline]:
+        """마크다운 인라인 요소 파싱 (**굵은글씨**)"""
+        inlines: List[IrInline] = []
+
+        # **굵은글씨** 패턴
+        bold_pattern = re.compile(r'\*\*(.+?)\*\*')
+        last_end = 0
+
+        for match in bold_pattern.finditer(text):
+            # 굵은글씨 앞의 일반 텍스트
+            if match.start() > last_end:
+                normal_text = text[last_end:match.start()]
+                if normal_text:
+                    inlines.append(IrTextRun(
+                        text=normal_text,
+                        font_family=self.font_family,
+                        font_size=base_font_size,
+                        bold=base_bold,
+                    ))
+
+            # 굵은글씨 텍스트
+            bold_text = match.group(1)
+            inlines.append(IrTextRun(
+                text=bold_text,
+                font_family=self.font_family,
+                font_size=base_font_size,
+                bold=True,
+            ))
+            last_end = match.end()
+
+        # 나머지 텍스트
+        if last_end < len(text):
+            remaining = text[last_end:]
+            if remaining:
+                inlines.append(IrTextRun(
+                    text=remaining,
+                    font_family=self.font_family,
+                    font_size=base_font_size,
+                    bold=base_bold,
+                ))
+
+        # 빈 경우 기본 텍스트
+        if not inlines:
+            inlines.append(IrTextRun(
+                text=text,
+                font_family=self.font_family,
+                font_size=base_font_size,
+                bold=base_bold,
+            ))
+
+        return inlines
 
     def _parse_text_to_inlines(self, text: str) -> List[IrInline]:
         """텍스트를 인라인 요소로 파싱 (줄바꿈, 탭 처리)"""
@@ -222,4 +295,47 @@ class HwpxBuilder:
             row_cnt=table.rows,
             col_cnt=table.cols,
             cells=ir_cells,
+        )
+
+    def _create_box_table(self, text: str) -> IrTable:
+        """박스(테두리 있는 영역)를 1x1 테이블로 생성"""
+        # 텍스트 정리 - 원본 줄바꿈 보존
+        cleaned = text.strip()
+
+        # 셀 내용 생성
+        inlines = [IrTextRun(
+            text=cleaned,
+            font_family=self.font_family,
+            font_size=self.font_size,
+        )]
+
+        cell_para = IrParagraph(
+            inlines=inlines,
+            line_spacing_type="percent",
+            line_spacing_value=self.line_spacing,
+        )
+        cell_block = IrBlock(type="paragraph", paragraph=cell_para)
+
+        # 1x1 셀 생성 - 여백 설정
+        from pdf2hwpx.hwpx_ir.models import IrMargin
+        ir_cell = IrTableCell(
+            row=0,
+            col=0,
+            row_span=1,
+            col_span=1,
+            blocks=[cell_block],
+            border_fill_id=5,
+            margin=IrMargin(left=283, right=283, top=142, bottom=142),  # 셀 여백
+        )
+
+        # 테이블 너비: 전체 컬럼 너비 (A4 기준 약 48000 HWPUNIT)
+        table_width = 48000
+
+        return IrTable(
+            row_cnt=1,
+            col_cnt=1,
+            cells=[ir_cell],
+            border_fill_id=5,
+            width_hwpunit=table_width,
+            col_widths=[table_width],
         )

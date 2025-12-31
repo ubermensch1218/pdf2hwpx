@@ -93,6 +93,24 @@ class StyleManager:
         # 문자 속성 노드
         self.char_prs_node = ref_list.find(etree.QName(NS["hh"], "charProperties"))
 
+        # charPr id=0의 폰트를 함초롬돋움(id=1)으로 변경
+        self._update_default_font()
+
+    def _update_default_font(self):
+        """기본 charPr(id=0)의 폰트를 함초롬돋움으로 변경"""
+        if self.char_prs_node is None:
+            return
+
+        for cp in self.char_prs_node.findall(etree.QName(NS["hh"], "charPr")):
+            if cp.get("id") == "0":
+                # fontRef 자식 요소 찾기
+                font_ref = cp.find(etree.QName(NS["hh"], "fontRef"))
+                if font_ref is not None:
+                    # 모든 언어의 폰트를 함초롬돋움(id=1)으로 변경
+                    for attr in ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"]:
+                        font_ref.set(attr, str(self.DEFAULT_FONT_ID))
+                break
+
     def get_font_id(self, font_name: str) -> int:
         """폰트 ID 반환 (없으면 기본 1)"""
         if not font_name:

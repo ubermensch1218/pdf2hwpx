@@ -15,6 +15,8 @@ class TextBlock:
     width: float
     height: float
     confidence: float = 1.0
+    is_box: bool = False  # 테두리 있는 박스 여부
+    heading_level: int = 0  # 제목 레벨 (0=일반, 1=대, 2=중, 3=소)
 
 
 @dataclass
@@ -48,6 +50,7 @@ class PageResult:
     text_blocks: list[TextBlock]
     tables: list[Table]
     images: list[bytes]  # 이미지 바이트 데이터
+    column_count: int = 1  # 컬럼 수 (1=단일, 2=2단)
 
 
 @dataclass

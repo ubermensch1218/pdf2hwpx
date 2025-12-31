@@ -11,6 +11,8 @@ from pdf2hwpx.ocr.openai import OpenAIOCR
 from pdf2hwpx.ocr.vllm import VllmOCR
 from pdf2hwpx.ocr.pymupdf import PyMuPDFBackend
 from pdf2hwpx.ocr.mineru import MinerUBackend
+from pdf2hwpx.ocr.openrouter import OpenRouterOCR
+from pdf2hwpx.ocr.gemini import GeminiOCR
 from pdf2hwpx.converter.hwpx_builder import HwpxBuilder
 
 
@@ -19,19 +21,22 @@ class Pdf2Hwpx:
 
     def __init__(
         self,
-        backend: Literal["cloud", "openai", "vllm", "pymupdf", "mineru"] = "cloud",
+        backend: Literal["cloud", "openai", "vllm", "pymupdf", "mineru", "openrouter", "gemini"] = "cloud",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
+        model: Optional[str] = None,
     ):
         """
         Args:
-            backend: OCR 백엔드 ("cloud", "openai", "vllm", "pymupdf", "mineru")
+            backend: OCR 백엔드 ("cloud", "openai", "vllm", "pymupdf", "mineru", "openrouter", "gemini")
             api_key: API 키
-            base_url: vLLM 서버 URL (vllm 백엔드 사용 시)
+            base_url: vLLM/OpenRouter 서버 URL
+            model: OpenRouter 모델 (openrouter 백엔드 사용 시)
         """
         self.backend = backend
         self.api_key = api_key
         self.base_url = base_url
+        self.model = model
         self._ocr: OCRBackend = self._create_ocr_backend()
         self._builder = HwpxBuilder()
 
@@ -47,6 +52,10 @@ class Pdf2Hwpx:
             return PyMuPDFBackend()
         elif self.backend == "mineru":
             return MinerUBackend()
+        elif self.backend == "openrouter":
+            return OpenRouterOCR(api_key=self.api_key, model=self.model)
+        elif self.backend == "gemini":
+            return GeminiOCR(api_key=self.api_key, model=self.model)
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
 
