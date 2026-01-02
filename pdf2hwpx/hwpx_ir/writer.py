@@ -69,6 +69,7 @@ class StyleManager:
     # 기본 폰트 설정 (함초롬돋움 = id 1)
     DEFAULT_FONT_ID = 1
     DEFAULT_FONT_SIZE = 1000  # 10pt
+    EQUATION_FONT_NAME = "HYhwpEQ"
 
     def __init__(self, header_xml: bytes):
         self.tree = etree.fromstring(header_xml)
@@ -93,8 +94,17 @@ class StyleManager:
         # 문자 속성 노드
         self.char_prs_node = ref_list.find(etree.QName(NS["hh"], "charProperties"))
 
+        # paraPr 노드
+        self.para_prs_node = ref_list.find(etree.QName(NS["hh"], "paraProperties"))
+
         # charPr id=0의 폰트를 함초롬돋움(id=1)으로 변경
         self._update_default_font()
+
+        # 수식 폰트 추가
+        self._add_equation_font()
+
+        # 기본 줄간격 160%로 설정
+        self._update_default_line_spacing()
 
     def _update_default_font(self):
         """기본 charPr(id=0)의 폰트를 함초롬돋움으로 변경"""
@@ -110,6 +120,56 @@ class StyleManager:
                     for attr in ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"]:
                         font_ref.set(attr, str(self.DEFAULT_FONT_ID))
                 break
+
+    def _update_default_line_spacing(self):
+        """기본 paraPr(id=0)의 줄간격을 160%로 변경"""
+        if self.para_prs_node is None:
+            return
+
+        for pp in self.para_prs_node.findall(etree.QName(NS["hh"], "paraPr")):
+            if pp.get("id") == "0":
+                # hp:switch 내부의 lineSpacing 찾기
+                for switch in pp.findall(etree.QName(NS["hp"], "switch")):
+                    # hp:case 내부
+                    for case in switch.findall(etree.QName(NS["hp"], "case")):
+                        line_spacing = case.find(etree.QName(NS["hh"], "lineSpacing"))
+                        if line_spacing is not None:
+                            line_spacing.set("value", "160")
+                    # hp:default 내부
+                    for default in switch.findall(etree.QName(NS["hp"], "default")):
+                        line_spacing = default.find(etree.QName(NS["hh"], "lineSpacing"))
+                        if line_spacing is not None:
+                            line_spacing.set("value", "160")
+                break
+
+    def _add_equation_font(self):
+        """수식 폰트(HYhwpEQ)를 모든 fontface에 추가"""
+        if self.fontfaces_node is None:
+            return
+
+        # 이미 있는지 확인
+        if self.EQUATION_FONT_NAME in self.font_map:
+            return
+
+        # 모든 fontface에 수식 폰트 추가
+        for fontface in self.fontfaces_node.findall(etree.QName(NS["hh"], "fontface")):
+            # 현재 폰트 개수 확인
+            fonts = fontface.findall(etree.QName(NS["hh"], "font"))
+            font_cnt = len(fonts)
+            new_id = font_cnt  # 새 폰트 ID
+
+            # HYhwpEQ 폰트 추가
+            new_font = etree.SubElement(fontface, etree.QName(NS["hh"], "font"))
+            new_font.set("id", str(new_id))
+            new_font.set("face", self.EQUATION_FONT_NAME)
+            new_font.set("type", "TTF")
+            new_font.set("isEmbedded", "0")
+
+            # fontCnt 업데이트
+            fontface.set("fontCnt", str(font_cnt + 1))
+
+        # 폰트 맵 업데이트
+        self.font_map[self.EQUATION_FONT_NAME] = font_cnt if font_cnt else 5
 
     def get_font_id(self, font_name: str) -> int:
         """폰트 ID 반환 (없으면 기본 1)"""

@@ -76,6 +76,80 @@ pdf2hwpx input.pdf -o output.hwpx --backend openai --api-key sk-xxx
 pdf2hwpx input.pdf -o output.hwpx --backend vllm --base-url http://localhost:8000/v1
 ```
 
+## MCP 서버
+
+pdf2hwpx를 MCP(Model Context Protocol) 서버로 사용하면 Claude에서 HWPX 파일을 직접 읽고 편집할 수 있습니다.
+
+### 제공 도구 (22개)
+
+| 카테고리 | 도구 |
+|---------|------|
+| PDF 변환 | `convert_pdf_to_hwpx`, `convert_pdf_bytes_to_hwpx` |
+| 정보 조회 | `get_hwpx_info`, `get_hwpx_text`, `get_hwpx_paragraph`, `get_hwpx_tables`, `get_hwpx_images`, `find_page_breaks` |
+| 검색 | `search_hwpx`, `search_hwpx_regex` |
+| 텍스트 편집 | `replace_text`, `set_paragraph_text` |
+| 단락 관리 | `insert_paragraph`, `delete_paragraph`, `copy_paragraph`, `move_paragraph` |
+| 스타일 | `set_paragraph_style`, `set_char_style`, `set_page_break`, `set_column_break` |
+| 테이블/이미지 | `insert_table`, `insert_image` |
+
+### Claude Desktop 설정
+
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) 또는 `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "pdf2hwpx": {
+      "command": "python",
+      "args": ["-m", "pdf2hwpx.mcp_server"],
+      "env": {
+        "OPENAI_API_KEY": "sk-xxx"
+      }
+    }
+  }
+}
+```
+
+또는 uv 사용:
+
+```json
+{
+  "mcpServers": {
+    "pdf2hwpx": {
+      "command": "uvx",
+      "args": ["pdf2hwpx"],
+      "env": {
+        "OPENAI_API_KEY": "sk-xxx"
+      }
+    }
+  }
+}
+```
+
+### Claude Code 설정
+
+```bash
+claude mcp add pdf2hwpx -- python -m pdf2hwpx.mcp_server
+```
+
+### 사용 예시
+
+Claude에서 다음과 같이 사용할 수 있습니다:
+
+```
+"test.hwpx 파일의 내용을 보여줘"
+→ get_hwpx_text 호출
+
+"'홍길동'을 '김철수'로 바꿔줘"
+→ replace_text 호출
+
+"5번 단락 뒤에 새 테이블을 추가해줘"
+→ insert_table 호출
+
+"이 마크다운 내용을 test.hwpx의 1번 섹션에 맞춰 작성해줘"
+→ get_hwpx_text로 양식 파악 → replace_text/insert_paragraph로 작성
+```
+
 ## 아키텍처
 
 ```
@@ -86,6 +160,12 @@ pdf2hwpx/
 │   └── vllm.py          # vLLM 서버
 ├── converter/
 │   └── hwpx_builder.py  # HWPX 변환 로직
+├── hwpx_ir/
+│   └── components/
+│       └── query/
+│           ├── searcher.py  # HWPX 검색
+│           └── editor.py    # HWPX 편집
+├── mcp_server.py        # MCP 서버
 └── cli.py               # CLI 인터페이스
 ```
 

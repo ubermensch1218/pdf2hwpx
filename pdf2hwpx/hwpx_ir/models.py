@@ -415,7 +415,14 @@ class IrTrackChange:
     new_text: Optional[str] = None  # 삽입된 텍스트
 
 
-IrInline = Union[IrTextRun, IrLineBreak, IrTab, IrHyperlink, IrBookmark, IrField, IrFootnote, IrEndnote, IrComment, IrTrackChange]
+@dataclass(frozen=True)
+class IrInlineEquation:
+    """인라인 수식"""
+    script: str  # HWP 수식 스크립트
+    base_line: int = 85  # 베이스라인 (0-100)
+
+
+IrInline = Union[IrTextRun, IrLineBreak, IrTab, IrHyperlink, IrBookmark, IrField, IrFootnote, IrEndnote, IrComment, IrTrackChange, IrInlineEquation]
 
 
 @dataclass(frozen=True)

@@ -37,6 +37,9 @@ class HwpxEditor:
         Args:
             section_xml: section0.xml 바이트
         """
+        self._original_xml = section_xml
+        self._xml_str = section_xml.decode("utf-8")  # 문자열 치환용
+        self._use_raw_mode = True  # 안전 모드 (문자열 직접 치환)
         self.root = etree.fromstring(section_xml)
         self._modified = False
 
@@ -45,8 +48,25 @@ class HwpxEditor:
         return self._modified
 
     def to_bytes(self) -> bytes:
-        """수정된 XML을 바이트로 반환"""
-        return etree.tostring(self.root, encoding="UTF-8", xml_declaration=True, standalone="yes")
+        """수정된 XML을 바이트로 반환 (원본 형식 최대한 유지)"""
+        if self._use_raw_mode:
+            # 안전 모드: 문자열 직접 반환 (lxml 사용 안 함)
+            return self._xml_str.encode("utf-8")
+
+        # lxml 모드: 구조 변경 시 사용 (헤더는 원본 유지)
+        body = etree.tostring(self.root, encoding="unicode")
+        orig_str = self._original_xml.decode("utf-8")
+        if orig_str.startswith("<?xml"):
+            header_end = orig_str.index("?>") + 2
+            header = orig_str[:header_end]
+        else:
+            header = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'
+
+        return (header + body).encode("utf-8")
+
+    def _switch_to_lxml_mode(self):
+        """구조 변경 시 lxml 모드로 전환 (주의: 파일 손상 가능성 있음)"""
+        self._use_raw_mode = False
 
     def _get_paragraphs(self) -> List[etree._Element]:
         """최상위 단락만 반환 (테이블 내 단락 제외)"""
@@ -206,31 +226,206 @@ class HwpxEditor:
     # ============================================================
 
     def replace_text(self, old_text: str, new_text: str, count: int = -1) -> int:
-        """텍스트 치환, 치환된 횟수 반환
+        """텍스트 치환, 치환된 횟수 반환 (안전한 문자열 직접 치환)
 
         Args:
             old_text: 찾을 텍스트
             new_text: 바꿀 텍스트
             count: 최대 치환 횟수 (-1이면 전체)
         """
-        replaced = 0
-        for t_elem in self.root.xpath(".//hp:t", namespaces=NS):
-            if t_elem.text and old_text in t_elem.text:
-                if count == -1:
-                    t_elem.text = t_elem.text.replace(old_text, new_text)
-                    replaced += t_elem.text.count(new_text)
-                else:
-                    remaining = count - replaced
-                    if remaining > 0:
-                        t_elem.text = t_elem.text.replace(old_text, new_text, remaining)
-                        replaced += min(remaining, t_elem.text.count(new_text))
+        if old_text not in self._xml_str:
+            return 0
 
-                if count != -1 and replaced >= count:
-                    break
+        if count == -1:
+            replaced = self._xml_str.count(old_text)
+            self._xml_str = self._xml_str.replace(old_text, new_text)
+        else:
+            replaced = min(count, self._xml_str.count(old_text))
+            self._xml_str = self._xml_str.replace(old_text, new_text, count)
 
         if replaced > 0:
             self._modified = True
         return replaced
+
+    # ============================================================
+    # 3-1. 문자열 기반 단락 삽입 (안전 모드)
+    # ============================================================
+
+    def insert_paragraph_after_text(
+        self,
+        after_text: str,
+        new_text: str,
+        para_pr_id: int = 0,
+        char_pr_id: int = 0,
+    ) -> bool:
+        """특정 텍스트를 포함하는 단락 뒤에 새 단락 삽입 (문자열 기반, 안전)
+
+        Args:
+            after_text: 이 텍스트를 포함하는 단락 뒤에 삽입
+            new_text: 삽입할 텍스트
+            para_pr_id: 단락 스타일 ID
+            char_pr_id: 문자 스타일 ID
+
+        Returns:
+            성공 여부
+        """
+        import re
+
+        # 해당 텍스트가 포함된 단락의 끝 태그 찾기
+        # <hp:t>텍스트</hp:t> ... </hp:p> 패턴
+        pattern = rf'<hp:t[^>]*>{re.escape(after_text)}</hp:t>'
+        match = re.search(pattern, self._xml_str)
+        if not match:
+            return False
+
+        # 해당 위치 이후의 </hp:p> 찾기
+        search_start = match.end()
+        p_end_pattern = r'</hp:p>'
+        p_end_match = re.search(p_end_pattern, self._xml_str[search_start:])
+        if not p_end_match:
+            return False
+
+        insert_pos = search_start + p_end_match.end()
+
+        # 새 단락 XML 생성
+        new_p_xml = self._create_paragraph_xml(new_text, para_pr_id, char_pr_id)
+
+        # 삽입
+        self._xml_str = self._xml_str[:insert_pos] + new_p_xml + self._xml_str[insert_pos:]
+        self._modified = True
+        return True
+
+    def insert_paragraphs_after_text(
+        self,
+        after_text: str,
+        texts: List[str],
+        para_pr_id: int = 0,
+        char_pr_id: int = 0,
+    ) -> int:
+        """특정 텍스트를 포함하는 단락 뒤에 여러 단락 삽입
+
+        Args:
+            after_text: 이 텍스트를 포함하는 단락 뒤에 삽입
+            texts: 삽입할 텍스트 목록
+            para_pr_id: 단락 스타일 ID
+            char_pr_id: 문자 스타일 ID
+
+        Returns:
+            삽입된 단락 수
+        """
+        import re
+
+        pattern = rf'<hp:t[^>]*>{re.escape(after_text)}</hp:t>'
+        match = re.search(pattern, self._xml_str)
+        if not match:
+            return 0
+
+        search_start = match.end()
+        p_end_pattern = r'</hp:p>'
+        p_end_match = re.search(p_end_pattern, self._xml_str[search_start:])
+        if not p_end_match:
+            return 0
+
+        insert_pos = search_start + p_end_match.end()
+
+        # 새 단락들 XML 생성
+        new_paragraphs_xml = ""
+        for text in texts:
+            new_paragraphs_xml += self._create_paragraph_xml(text, para_pr_id, char_pr_id)
+
+        self._xml_str = self._xml_str[:insert_pos] + new_paragraphs_xml + self._xml_str[insert_pos:]
+        self._modified = True
+        return len(texts)
+
+    def _create_paragraph_xml(
+        self,
+        text: str,
+        para_pr_id: int = 0,
+        char_pr_id: int = 0,
+    ) -> str:
+        """단락 XML 문자열 생성"""
+        # XML 특수문자 이스케이프
+        escaped_text = (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+
+        return f'''<hp:p id="0" paraPrIDRef="{para_pr_id}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">
+  <hp:run charPrIDRef="{char_pr_id}">
+    <hp:t>{escaped_text}</hp:t>
+  </hp:run>
+  <hp:linesegarray>
+    <hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="0" flags="393216"/>
+  </hp:linesegarray>
+</hp:p>'''
+
+    def append_paragraph_raw(
+        self,
+        text: str,
+        para_pr_id: int = 0,
+        char_pr_id: int = 0,
+    ) -> bool:
+        """문서 끝(</hs:sec> 앞)에 단락 추가 (문자열 기반, 안전)
+
+        Args:
+            text: 삽입할 텍스트
+            para_pr_id: 단락 스타일 ID
+            char_pr_id: 문자 스타일 ID
+
+        Returns:
+            성공 여부
+        """
+        end_tag = "</hs:sec>"
+        if end_tag not in self._xml_str:
+            return False
+
+        insert_pos = self._xml_str.rfind(end_tag)
+        new_p_xml = self._create_paragraph_xml(text, para_pr_id, char_pr_id)
+
+        self._xml_str = self._xml_str[:insert_pos] + new_p_xml + self._xml_str[insert_pos:]
+        self._modified = True
+        return True
+
+    def copy_paragraph_style_and_insert(
+        self,
+        source_text: str,
+        new_text: str,
+    ) -> bool:
+        """기존 단락의 스타일을 복사해서 새 단락 삽입 (문자열 기반, 안전)
+
+        Args:
+            source_text: 복사할 스타일의 단락에 포함된 텍스트
+            new_text: 새 단락의 텍스트
+
+        Returns:
+            성공 여부
+        """
+        import re
+
+        # source_text가 포함된 <hp:p ...>...</hp:p> 전체 찾기
+        pattern = rf'<hp:p[^>]*>.*?<hp:t[^>]*>{re.escape(source_text)}</hp:t>.*?</hp:p>'
+        match = re.search(pattern, self._xml_str, re.DOTALL)
+        if not match:
+            return False
+
+        source_p = match.group(0)
+        insert_pos = match.end()
+
+        # 소스 단락에서 paraPrIDRef와 charPrIDRef 추출
+        para_pr_match = re.search(r'paraPrIDRef="(\d+)"', source_p)
+        char_pr_match = re.search(r'charPrIDRef="(\d+)"', source_p)
+
+        para_pr_id = int(para_pr_match.group(1)) if para_pr_match else 0
+        char_pr_id = int(char_pr_match.group(1)) if char_pr_match else 0
+
+        # 새 단락 생성
+        new_p_xml = self._create_paragraph_xml(new_text, para_pr_id, char_pr_id)
+
+        self._xml_str = self._xml_str[:insert_pos] + new_p_xml + self._xml_str[insert_pos:]
+        self._modified = True
+        return True
 
     def set_paragraph_text(self, index: int, text: str, char_pr_id: int = 0) -> bool:
         """특정 단락의 텍스트 교체"""
